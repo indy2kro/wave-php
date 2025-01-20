@@ -1,15 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<phpunit
-  bootstrap="vendor/autoload.php"
-  colors="true"
-  convertErrorsToExceptions="true"
-  convertNoticesToExceptions="true"
-  convertWarningsToExceptions="true"
-  stopOnFailure="true"
->
-  <testsuites>
-    <testsuite name="bluemoehre/wave-php Test Suite">
-      <directory>tests</directory>
-    </testsuite>
-  </testsuites>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    backupGlobals="false" 
+    colors="true"
+    stopOnFailure="false"
+    bootstrap="vendor/autoload.php"
+    failOnDeprecation="true"
+    failOnEmptyTestSuite="true"
+    failOnIncomplete="true"
+    failOnNotice="true"
+    failOnRisky="true"
+    failOnSkipped="false"
+    failOnWarning="true"
+    xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/8.3/phpunit.xsd">
+    <source>
+        <include>
+            <directory>./src/</directory>
+        </include>
+    </source>
+    <testsuites>
+      <testsuite name="bluemoehre/wave-php Test Suite">
+        <directory>tests</directory>
+      </testsuite>
+    </testsuites>
 </phpunit>
