@@ -5,12 +5,9 @@ declare(strict_types=1);
 namespace bluemoehre\Tests;
 
 use bluemoehre\Wave;
+use bluemoehre\Exception;
 use PHPUnit\Framework\TestCase;
-use Exception;
-use RuntimeException;
-use UnexpectedValueException;
 use PHPUnit\Framework\Attributes\DataProvider;
-use OutOfRangeException;
 use Iterator;
 
 class WaveTest extends TestCase
@@ -25,7 +22,7 @@ class WaveTest extends TestCase
 
     public function testSetFileWithEmptyFilePath(): void
     {
-        $this->expectException(RuntimeException::class);
+        $this->expectException(Exception::class);
         $this->expectExceptionMessage('No file specified');
         $wave = new Wave();
         $wave->setFile('');
@@ -33,7 +30,7 @@ class WaveTest extends TestCase
 
     public function testConstructorWithInvalidFilePath(): void
     {
-        $this->expectException(RuntimeException::class);
+        $this->expectException(Exception::class);
         $this->expectExceptionMessage('File does not exist');
         new Wave('nonexistent.wav');
     }
@@ -56,11 +53,11 @@ class WaveTest extends TestCase
     {
         $wave = new Wave('fixtures/48000Hz-24bit-2ch.wav');
 
-        $this->expectException(OutOfRangeException::class);
+        $this->expectException(Exception::class);
         $this->expectExceptionMessage('Resolution must be between 1 and 0.000001');
         $wave->generateSvg('', 1.1);
 
-        $this->expectException(OutOfRangeException::class);
+        $this->expectException(Exception::class);
         $this->expectExceptionMessage('Resolution must be between 1 and 0.000001');
         $wave->generateSvg('', 0.0000001);
 
@@ -77,14 +74,14 @@ class WaveTest extends TestCase
 
     public function testMockFileHandlingFailures(): void
     {
-        $this->expectException(RuntimeException::class);
+        $this->expectException(Exception::class);
         $this->expectExceptionMessage('Failed to open file');
 
         $wave = $this->getMockBuilder(Wave::class)
             ->onlyMethods(['setFile'])
             ->getMock();
 
-        $wave->method('setFile')->willThrowException(new RuntimeException('Failed to open file'));
+        $wave->method('setFile')->willThrowException(new Exception('Failed to open file'));
 
         $wave->setFile('mocked.wav');
     }
