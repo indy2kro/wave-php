@@ -23,8 +23,13 @@ class WaveData
     {
         do {
             $subChunkId = fread($fileHandle, 4);
-            if ($subChunkId === false || strlen($subChunkId) < 4) {
+
+            if ($subChunkId === false) {
                 throw new Exception('Failed to read sub chunk id from file', ErrorCodes::ERR_FILE_READ);
+            }
+
+            if (strlen($subChunkId) < 4) {
+                throw new Exception('Invalid sub chunk id', ErrorCodes::ERR_FILE_READ);
             }
 
             $subChunkSizeData = fread($fileHandle, 4);

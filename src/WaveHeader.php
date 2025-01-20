@@ -116,6 +116,11 @@ class WaveHeader
             throw new Exception('Unsupported file format', ErrorCodes::ERR_FILE_INCOMPATIBLE);
         }
 
+        $offset = ftell($fileHandle);
+        if ($offset === false) {
+            throw new Exception('Ftell failed', ErrorCodes::ERR_FILE_READ);
+        }
+
         $subChunk1 = fread($fileHandle, 20);
         if ($subChunk1 === false) {
             throw new Exception('Failed to read sub chunk 1 from file', ErrorCodes::ERR_FILE_READ);
@@ -131,12 +136,18 @@ class WaveHeader
             throw new Exception('Unsupported audio format', ErrorCodes::ERR_FILE_INCOMPATIBLE);
         }
 
+        $subChunk1Size = (int) $subChunk1Unpacked['subChunk1Size'];
         $this->audioFormat = $subChunk1Unpacked['audioFormat'];
         $this->channels = (int) $subChunk1Unpacked['channels'];
         $this->sampleRate = (int) $subChunk1Unpacked['sampleRate'];
         $this->byteRate = (int) $subChunk1Unpacked['byteRate'];
         $this->blockAlign = (int) $subChunk1Unpacked['blockAlign'];
         $this->bitsPerSample = (int) $subChunk1Unpacked['bitsPerSample'];
+
+        $offset += 4;
+        if (fseek($fileHandle, $offset + $subChunk1Size) === -1) {
+            throw new Exception('Failed to seek in file', ErrorCodes::ERR_FILE_READ);
+        }
 
         $this->validateHeader();
     }

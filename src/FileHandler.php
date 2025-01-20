@@ -30,7 +30,7 @@ class FileHandler
      *
      * @throws Exception
      */
-    public function openFile(string $mode = 'r'): mixed
+    public function openFile(string $mode = 'rb'): mixed
     {
         if ($this->filePath === null) {
             throw new Exception('No file was loaded', ErrorCodes::ERR_FILE_ACCESS);

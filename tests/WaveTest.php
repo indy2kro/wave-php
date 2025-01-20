@@ -88,17 +88,19 @@ class WaveTest extends TestCase
 
     public static function waveFileProvider(): Iterator
     {
-        //            '44100Hz-16bit-1ch' => [
-        //                'file' => 'fixtures/44100Hz-16bit-1ch.wav',
-        //                'expectedChannels' => 1,
-        //                'expectedSampleRate' => 44100,
-        //                'expectedByteRate' => 88200,
-        //                'expectedKbps' => 705.6,
-        //                'expectedBitsPerSample' => 16,
-        //                'expectedTotalSamples' => 441000,
-        //                'expectedTotalSeconds' => 10,
-        //                'svgSnapshot' => './tests/snapshots/44100Hz-16bit-1ch.svg',
-        //            ],
+        yield '44100Hz-16bit-1ch' => [
+            'file' => 'fixtures/44100Hz-16bit-1ch.wav',
+            'expectedChannels' => 1,
+            'expectedSampleRate' => 44100,
+            'expectedByteRate' => 88200,
+            'expectedKbps' => 705.6,
+            'expectedBitsPerSample' => 16,
+            'expectedTotalSamples' => 441000,
+            'expectedTotalSeconds' => 10,
+            'expectedChunkSize' => 882038,
+            'expectedAudioFormat' => 1,
+            'svgSnapshot' => './tests/snapshots/44100Hz-16bit-1ch.svg',
+        ];
         yield '48000Hz-24bit-2ch' => [
             'file' => 'fixtures/48000Hz-24bit-2ch.wav',
             'expectedChannels' => 2,
@@ -108,6 +110,8 @@ class WaveTest extends TestCase
             'expectedBitsPerSample' => 16,
             'expectedTotalSamples' => 480000,
             'expectedTotalSeconds' => 10,
+            'expectedChunkSize' => 1920070,
+            'expectedAudioFormat' => 1,
             'svgSnapshot' => './tests/snapshots/48000Hz-24bit-2ch.svg',
         ];
         yield '48000Hz-16bit-2ch' => [
@@ -119,6 +123,8 @@ class WaveTest extends TestCase
             'expectedBitsPerSample' => 16,
             'expectedTotalSamples' => 1860560,
             'expectedTotalSeconds' => 39,
+            'expectedChunkSize' => 7442276,
+            'expectedAudioFormat' => 1,
             'svgSnapshot' => './tests/snapshots/LRMonoPhase4.svg',
         ];
         yield '48000Hz-16bit-2ch-short' => [
@@ -130,6 +136,8 @@ class WaveTest extends TestCase
             'expectedBitsPerSample' => 16,
             'expectedTotalSamples' => 302712,
             'expectedTotalSeconds' => 6,
+            'expectedChunkSize' => 1210884,
+            'expectedAudioFormat' => 1,
             'svgSnapshot' => './tests/snapshots/piano2.svg',
         ];
     }
@@ -144,9 +152,13 @@ class WaveTest extends TestCase
         int $expectedBitsPerSample,
         int $expectedTotalSamples,
         int $expectedTotalSeconds,
+        int $expectedChunkSize,
+        int $expectedAudioFormat,
         string $svgSnapshot
     ): void {
         $wave = new Wave($file);
+
+        $tmpFile = './tests/snapshots/tmp_' . uniqid();
 
         $this->assertSame($expectedChannels, $wave->getChannels(), 'Channel count should match');
         $this->assertSame($expectedSampleRate, $wave->getSampleRate(), 'Sample rate should match');
@@ -155,6 +167,12 @@ class WaveTest extends TestCase
         $this->assertSame($expectedBitsPerSample, $wave->getBitsPerSample(), 'Bits per sample should match');
         $this->assertSame($expectedTotalSamples, $wave->getTotalSamples(), 'Total samples should match');
         $this->assertSame($expectedTotalSeconds, $wave->getTotalSeconds(), 'Total seconds should match');
+        $this->assertSame($expectedChunkSize, $wave->getChunkSize(), 'Chunk size should match');
+        $this->assertSame($expectedAudioFormat, $wave->getAudioFormat(), 'Audio format should match');
         $this->assertEquals(file_get_contents($svgSnapshot), $wave->generateSvg(), 'SVG should match snapshot');
+        $wave->generateSvg($tmpFile);
+        $content = file_get_contents($tmpFile);
+        unlink($tmpFile);
+        $this->assertEquals(file_get_contents($svgSnapshot), $content, 'SVG should match snapshot');
     }
 }
