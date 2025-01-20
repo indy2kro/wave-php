@@ -99,11 +99,12 @@ class Wave
             throw new RuntimeException('Failed to read chunk size from file', self::ERR_FILE_READ);
         }
 
+        /** @var array<string, int>|false $chunkSizeUnpacked */
         $chunkSizeUnpacked = unpack('VchunkSize', $chunkSize);
         if ($chunkSizeUnpacked === false) {
             throw new RuntimeException('Failed to unpack chunk size', self::ERR_FILE_READ);
         }
-        $this->chunkSize = $chunkSizeUnpacked['chunkSize'];
+        $this->chunkSize = (int) $chunkSizeUnpacked['chunkSize'];
 
         $format = fread($fileHandle, 4);
         if ($format === false || $format !== 'WAVE') {
@@ -122,23 +123,24 @@ class Wave
             throw new RuntimeException('Failed to read sub chunk 1 from file', self::ERR_FILE_READ);
         }
 
+        /** @var array<string, int>|false $subChunk1Unpacked */
         $subChunk1Unpacked = unpack('VsubChunk1Size/vaudioFormat/vchannels/VsampleRate/VbyteRate/vblockAlign/vbitsPerSample', $subChunk1);
 
         if ($subChunk1Unpacked === false) {
             throw new RuntimeException('Failed to unpack sub chunk 1', self::ERR_FILE_READ);
         }
-        $this->subChunk1Size = $subChunk1Unpacked['subChunk1Size'];
+        $this->subChunk1Size = (int) $subChunk1Unpacked['subChunk1Size'];
 
         if ($subChunk1Unpacked['audioFormat'] !== 1) {
             throw new Exception('Unsupported audio format', self::ERR_FILE_INCOMPATIBLE);
         }
 
         $this->audioFormat = $subChunk1Unpacked['audioFormat'];
-        $this->channels = $subChunk1Unpacked['channels'];
-        $this->sampleRate = $subChunk1Unpacked['sampleRate'];
-        $this->byteRate = $subChunk1Unpacked['byteRate'];
-        $this->blockAlign = $subChunk1Unpacked['blockAlign'];
-        $this->bitsPerSample = $subChunk1Unpacked['bitsPerSample'];
+        $this->channels = (int) $subChunk1Unpacked['channels'];
+        $this->sampleRate = (int) $subChunk1Unpacked['sampleRate'];
+        $this->byteRate = (int) $subChunk1Unpacked['byteRate'];
+        $this->blockAlign = (int) $subChunk1Unpacked['blockAlign'];
+        $this->bitsPerSample = (int) $subChunk1Unpacked['bitsPerSample'];
 
         if ($this->byteRate !== $this->sampleRate * $this->channels * $this->bitsPerSample / 8) {
             throw new Exception('File header contains invalid data: byte rate does not match', self::ERR_FILE_HEADER);
@@ -160,11 +162,12 @@ class Wave
                 throw new RuntimeException('Failed to read sub chunk size from file', self::ERR_FILE_READ);
             }
 
+            /** @var array<string, int>|false $subChunkSizeUnpacked */
             $subChunkSizeUnpacked = unpack('VsubChunkSize', $subChunkSizeData);
             if ($subChunkSizeUnpacked === false || ! isset($subChunkSizeUnpacked['subChunkSize'])) {
                 throw new RuntimeException('Failed to unpack sub chunk size', self::ERR_FILE_READ);
             }
-            $subChunkSize = $subChunkSizeUnpacked['subChunkSize'];
+            $subChunkSize = (int) $subChunkSizeUnpacked['subChunkSize'];
 
             if ($subChunkId !== 'data') {
                 // Skip non-data chunk
@@ -187,7 +190,7 @@ class Wave
         $this->dataOffset = $dataOffset;
 
         $this->kiloBitPerSecond = $this->byteRate * 8 / 1000;
-        $this->totalSamples = $this->subChunk2Size * 8 / $this->bitsPerSample / $this->channels;
+        $this->totalSamples = (int) ($this->subChunk2Size * 8 / $this->bitsPerSample / $this->channels);
         $this->totalSeconds = (int) round($this->subChunk2Size / $this->byteRate);
 
         if (! fclose($fileHandle)) {
@@ -226,6 +229,7 @@ class Wave
         }
 
         $sampleSummaryLength = $this->sampleRate / ($resolution * $this->sampleRate);
+        /** @var array<int, array<int, int>> $sampleSummaries */
         $sampleSummaries = [];
         $i = 0;
         if (fseek($fileHandle, $this->dataOffset) === -1) {
@@ -238,12 +242,13 @@ class Wave
 
         $samples = [];
         while (($data = fread($fileHandle, $this->bitsPerSample))) {
+            /** @var array<string, int>|false $sample */
             $sample = unpack('svol', $data);
 
             if ($sample === false) {
                 throw new RuntimeException('Failed to unpack summary', self::ERR_FILE_READ);
             }
-            $samples[] = $sample['vol'];
+            $samples[] = (int) $sample['vol'];
 
             // when all samples for a summary are collected, get lows & peaks
             if ($i > 0 && $i % $sampleSummaryLength === 0) {
@@ -265,13 +270,21 @@ class Wave
             throw new RuntimeException('Failed to close file', self::ERR_FILE_CLOSE);
         }
 
-        $minPossibleValue = 2 ** $this->bitsPerSample / 2 * -1;
-        $maxPossibleValue = $minPossibleValue * -1 - 1;
-        $range = 2 ** $this->bitsPerSample;
+        $minPossibleValue = (float) (2 ** $this->bitsPerSample / 2 * -1);
+        $maxPossibleValue = (float) ($minPossibleValue * -1 - 1);
+        $range = (float) (2 ** $this->bitsPerSample);
         $svgPathTop = '';
         $svgPathBottom = '';
 
+        if ($range === 0.0) {
+            throw new RuntimeException('Invalid range value', self::ERR_FILE_READ);
+        }
+
         foreach ($sampleSummaries as $x => $sampleMinMax) {
+            if ($sampleMinMax[0] === 0 || $sampleMinMax[1] === 0) {
+                continue;
+            }
+
             # TODO configurable vertical detail
             $y = round(100 / $range * ($maxPossibleValue - $sampleMinMax[1]));
             $svgPathTop .= "L{$x} {$y}";
