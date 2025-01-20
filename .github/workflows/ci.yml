@@ -26,7 +26,7 @@ jobs:
           - "8.4"
 
     runs-on: ${{ matrix.os }}
-    name: Test PHP ${{ matrix.php }}, ${{ matrix.os }},
+    name: Test PHP ${{ matrix.php-version }}, ${{ matrix.os }}
 
     steps:
 
