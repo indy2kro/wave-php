@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace bluemoehre;
 
 use Exception;
+use OutOfRangeException;
 use RuntimeException;
 use UnexpectedValueException;
 
@@ -29,7 +30,7 @@ class Wave
 
     public const SVG_DEFAULT_RESOLUTION_FACTOR = 0.01;
 
-    protected string $file;
+    protected ?string $file = null;
 
     protected string $chunkId;
 
@@ -57,15 +58,15 @@ class Wave
 
     protected int $dataOffset;
 
-    protected int $kiloBitPerSecond;
+    protected float $kiloBitPerSecond;
 
     protected int $totalSamples;
 
-    protected float $totalSeconds;
+    protected int $totalSeconds;
 
     public function __construct(string $file = '')
     {
-        if (! empty($file)) {
+        if ($file !== '') {
             $this->setFile($file);
         }
     }
@@ -75,18 +76,21 @@ class Wave
      */
     public function setFile(string $file): void
     {
-        if (empty($file)) {
+        if ($file === '') {
             throw new UnexpectedValueException('No file specified', self::ERR_PARAM_VALUE);
+        }
+        if (! file_exists($file)) {
+            throw new RuntimeException('File does not exist', self::ERR_PARAM_VALUE);
         }
         $fileHandle = fopen($file, 'r');
         if ($fileHandle === false) {
-            throw new RuntimeException('Failed to open file for reading<', self::ERR_FILE_ACCESS);
+            throw new RuntimeException('Failed to open file for reading', self::ERR_FILE_ACCESS);
         }
         $this->file = $file;
 
         $chunkId = fread($fileHandle, 4);
         if ($chunkId === false) {
-            throw new RuntimeException('Failed to read from file', self::ERR_FILE_READ);
+            throw new RuntimeException('Failed to read chunk id from file', self::ERR_FILE_READ);
         }
         if ($chunkId !== 'RIFF') {
             throw new Exception('Unsupported file type', self::ERR_FILE_INCOMPATIBLE);
@@ -95,13 +99,20 @@ class Wave
 
         $chunkSize = fread($fileHandle, 4);
         if ($chunkSize === false) {
-            throw new RuntimeException('Failed to read from file', self::ERR_FILE_READ);
+            throw new RuntimeException('Failed to read chunk size from file', self::ERR_FILE_READ);
         }
-        $this->chunkSize = unpack('VchunkSize', $chunkSize);
+
+        $chunkSizeUnpacked = unpack('VchunkSize', $chunkSize);
+
+        if ($chunkSizeUnpacked === false) {
+            throw new RuntimeException('Failed to unpack chunk size', self::ERR_FILE_READ);
+        }
+
+        $this->chunkSize = $chunkSizeUnpacked['chunkSize'];
 
         $format = fread($fileHandle, 4);
         if ($format === false) {
-            throw new RuntimeException('Failed to read from file', self::ERR_FILE_READ);
+            throw new RuntimeException('Failed to read format from file', self::ERR_FILE_READ);
         }
         if ($format !== 'WAVE') {
             throw new Exception('Unsupported file format', self::ERR_FILE_INCOMPATIBLE);
@@ -110,7 +121,7 @@ class Wave
 
         $subChunk1Id = fread($fileHandle, 4);
         if ($subChunk1Id === false) {
-            throw new RuntimeException('Failed to read from file', self::ERR_FILE_READ);
+            throw new RuntimeException('Failed to read sub chunk 1 id from file', self::ERR_FILE_READ);
         }
         if ($subChunk1Id !== 'fmt ') {
             throw new Exception('Unsupported file format', self::ERR_FILE_INCOMPATIBLE);
@@ -120,7 +131,7 @@ class Wave
         $offset = ftell($fileHandle);
         $subChunk1 = fread($fileHandle, 20);
         if ($subChunk1 === false) {
-            throw new RuntimeException('Failed to read from file', self::ERR_FILE_READ);
+            throw new RuntimeException('Failed to read sub chunk 1 from file', self::ERR_FILE_READ);
         }
         $subChunk1 = unpack('VsubChunk1Size/vaudioFormat/vchannels/VsampleRate/VbyteRate/vblockAlign/vbitsPerSample', $subChunk1);
         $this->subChunk1Size = $subChunk1['subChunk1Size'];
@@ -135,10 +146,10 @@ class Wave
         $this->blockAlign = $subChunk1['blockAlign'];
         $this->bitsPerSample = $subChunk1['bitsPerSample'];
         if ($this->byteRate !== $this->sampleRate * $this->channels * $this->bitsPerSample / 8) {
-            throw new Exception('File header contains invalid data', self::ERR_FILE_HEADER);
+            throw new Exception('File header contains invalid data: byte rate does not match', self::ERR_FILE_HEADER);
         }
         if ($this->blockAlign !== $this->channels * $this->bitsPerSample / 8) {
-            throw new Exception('File header contains invalid data', self::ERR_FILE_HEADER);
+            throw new Exception('File header contains invalid data: block align does not match', self::ERR_FILE_HEADER);
         }
 
         if (fseek($fileHandle, $offset + $this->subChunk1Size) === -1) {
@@ -146,7 +157,7 @@ class Wave
         }
         $subChunk2Id = fread($fileHandle, 4);
         if ($subChunk2Id === false) {
-            throw new RuntimeException('Failed to read from file', self::ERR_FILE_READ);
+            throw new RuntimeException('Failed to read sub chunk 2 id from file', self::ERR_FILE_READ);
         }
         if ($subChunk2Id !== 'data') {
             throw new Exception('File header contains invalid data', self::ERR_FILE_HEADER);
@@ -154,7 +165,7 @@ class Wave
 
         $subChunk2 = fread($fileHandle, 4);
         if ($subChunk2 === false) {
-            throw new RuntimeException('Failed to read from file', self::ERR_FILE_READ);
+            throw new RuntimeException('Failed to read sub chunk 2 from file', self::ERR_FILE_READ);
         }
         $subChunk2 = unpack('VdataSize', $subChunk2);
         $this->subChunk2Size = $subChunk2['dataSize'];
@@ -162,7 +173,7 @@ class Wave
 
         $this->kiloBitPerSecond = $this->byteRate * 8 / 1000;
         $this->totalSamples = $this->subChunk2Size * 8 / $this->bitsPerSample / $this->channels;
-        $this->totalSeconds = $this->subChunk2Size / $this->byteRate;
+        $this->totalSeconds = (int) round($this->subChunk2Size / $this->byteRate);
 
         if (! fclose($fileHandle)) {
             throw new RuntimeException('Failed to close file', self::ERR_FILE_CLOSE);
@@ -180,20 +191,18 @@ class Wave
     {
         $outputFileHandle = null;
 
-        if (! empty($outputFile)) {
+        if ($outputFile !== '') {
             $outputFileHandle = fopen($outputFile, 'w');
             if (! $outputFileHandle) {
                 throw new RuntimeException('Failed to open output file for writing', self::ERR_FILE_ACCESS);
             }
         }
-        if (filter_var($resolution, FILTER_VALIDATE_FLOAT) === false) {
-            throw new InvalidArgumentException('Resolution must be of type float', self::ERR_PARAM_VALUE);
-        }
+
         if ($resolution > 1.0 || $resolution < 0.000001) {
             throw new OutOfRangeException('Resolution must be between 1 and 0.000001', self::ERR_PARAM_VALUE);
         }
 
-        if (empty($this->file)) {
+        if ($this->file === null) {
             throw new Exception('No file was loaded', self::ERR_FILE_ACCESS);
         }
         $fileHandle = fopen($this->file, 'r');
@@ -208,6 +217,7 @@ class Wave
             throw new RuntimeException('Failed to seek in file', self::ERR_FILE_READ);
         }
 
+        $samples = [];
         while (($data = fread($fileHandle, $this->bitsPerSample))) {
             $sample = unpack('svol', $data);
             $samples[] = $sample['vol'];
@@ -250,16 +260,16 @@ class Wave
         // TODO move gradient to stylesheet
         // TODO this should be improved to use kinda template
         $svg =
-            '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="' . count($sampleSummaries) . 'px" height="100px" preserveAspectRatio="none">' .
-            '<defs>' .
-            '<linearGradient id="gradient" x1="0%" y1="0%" x2="0%" y2="100%">' .
-            '<stop offset="0%" style="stop-color:rgb(0,0,0);stop-opacity:1"/>' .
-            '<stop offset="50%" style="stop-color:rgb(50,50,50);stop-opacity:1"/>' .
-            '<stop offset="100%" style="stop-color:rgb(0,0,0);stop-opacity:1"/>' .
-            '</linearGradient>' .
-            '</defs>' .
-            '<path d="M0 50' . $svgPathTop . $svgPathBottom . 'L0 50 Z" fill="url(#gradient)"/>' .
-            '</svg>';
+        '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="' . count($sampleSummaries) . 'px" height="100px" preserveAspectRatio="none">
+    <defs>
+        <linearGradient id="gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:rgb(0,0,0);stop-opacity:1"/>
+            <stop offset="50%" style="stop-color:rgb(50,50,50);stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:rgb(0,0,0);stop-opacity:1"/>
+        </linearGradient>
+    </defs>
+    <path d="M0 50' . $svgPathTop . $svgPathBottom . 'L0 50 Z" fill="url(#gradient)"/>
+</svg>';
 
         if ($outputFileHandle) {
             if (fwrite($outputFileHandle, $svg) === false) {
@@ -288,7 +298,7 @@ class Wave
         return $this->byteRate;
     }
 
-    public function getKiloBitPerSecond(): int
+    public function getKiloBitPerSecond(): float
     {
         return $this->kiloBitPerSecond;
     }
@@ -303,8 +313,8 @@ class Wave
         return $this->totalSamples;
     }
 
-    public function getTotalSeconds(bool $float = false): float|int
+    public function getTotalSeconds(): int
     {
-        return $float ? $this->totalSeconds : round($this->totalSeconds);
+        return $this->totalSeconds;
     }
 }

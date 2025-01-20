@@ -19,7 +19,6 @@ class WaveTest extends TestCase
         $this->assertSame(16, $wave->getBitsPerSample(), 'Bits per sample should match');
         $this->assertSame(441000, $wave->getTotalSamples(), 'Total samples should match');
         $this->assertSame(10, $wave->getTotalSeconds(), 'Total seconds should match');
-        $this->assertEqualsWithDelta(10.0, $wave->getTotalSeconds(true), PHP_FLOAT_EPSILON, 'Total seconds with decimals should match');
         $this->assertEquals(file_get_contents('./tests/snapshots/44100Hz-16bit-1ch.svg'), $wave->generateSvg(), 'SVG should match snapshot');
     }
 }
