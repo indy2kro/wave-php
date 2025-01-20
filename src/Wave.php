@@ -87,123 +87,19 @@ class Wave
             throw new RuntimeException('Failed to close file', self::ERR_FILE_CLOSE);
         }
     }
-
-    /**
-     * TODO verify calculations
-     *
-     * @param float $resolution - Must be <=1. If 1 SVG will be full waveform resolution (amazing large filesize)
-     *
-     * @throws Exception
-     */
     public function generateSvg(string $outputFile = '', float $resolution = self::SVG_DEFAULT_RESOLUTION_FACTOR): string
     {
-        $outputFileHandle = null;
+        $outputFileHandle = $this->openOutputFile($outputFile);
+        $this->validateResolution($resolution);
+        $fileHandle = $this->openInputFile();
 
-        if ($outputFile !== '') {
-            $outputFileHandle = fopen($outputFile, 'w');
-            if ($outputFileHandle === false) {
-                throw new RuntimeException('Failed to open output file for writing', self::ERR_FILE_ACCESS);
-            }
-        }
+        $sampleSummaries = $this->collectSampleSummaries($fileHandle, $resolution);
+        fclose($fileHandle);
 
-        if ($resolution > 1.0 || $resolution < 0.000001) {
-            throw new OutOfRangeException('Resolution must be between 1 and 0.000001', self::ERR_PARAM_VALUE);
-        }
-
-        if ($this->file === null) {
-            throw new Exception('No file was loaded', self::ERR_FILE_ACCESS);
-        }
-        $fileHandle = fopen($this->file, 'r');
-        if (! $fileHandle) {
-            throw new RuntimeException('Failed to open file', self::ERR_FILE_ACCESS);
-        }
-
-        $sampleSummaryLength = $this->sampleRate / ($resolution * $this->sampleRate);
-        /** @var array<int, array<int, int>> $sampleSummaries */
-        $sampleSummaries = [];
-        $i = 0;
-        if (fseek($fileHandle, $this->dataOffset) === -1) {
-            throw new RuntimeException('Failed to seek in file', self::ERR_FILE_READ);
-        }
-
-        if ($this->bitsPerSample <= 0) {
-            throw new RuntimeException('Invalid value for bitsPerSample', self::ERR_FILE_READ);
-        }
-
-        $samples = [];
-        while (($data = fread($fileHandle, $this->bitsPerSample))) {
-            /** @var array<string, int>|false $sample */
-            $sample = unpack('svol', $data);
-
-            if ($sample === false) {
-                throw new RuntimeException('Failed to unpack summary', self::ERR_FILE_READ);
-            }
-            $samples[] = (int) $sample['vol'];
-
-            // when all samples for a summary are collected, get lows & peaks
-            if ($i > 0 && $i % $sampleSummaryLength === 0) {
-                $minValue = min($samples);
-                $maxValue = max($samples);
-                $sampleSummaries[] = [$minValue, $maxValue];
-                $samples = []; // reset
-            }
-            $i++;
-
-            // TODO analyze side effects and remove
-            // skip to increase speed
-            if (fseek($fileHandle, $this->bitsPerSample * $this->channels * 3, SEEK_CUR) === -1) {
-                throw new RuntimeException('Failed to seek in file', self::ERR_FILE_READ);
-            }
-        }
-
-        if (! fclose($fileHandle)) {
-            throw new RuntimeException('Failed to close file', self::ERR_FILE_CLOSE);
-        }
-
-        $minPossibleValue = (float) (2 ** $this->bitsPerSample / 2 * -1);
-        $maxPossibleValue = (float) ($minPossibleValue * -1 - 1);
-        $range = (float) (2 ** $this->bitsPerSample);
-        $svgPathTop = '';
-        $svgPathBottom = '';
-
-        if ($range === 0.0) {
-            throw new RuntimeException('Invalid range value', self::ERR_FILE_READ);
-        }
-
-        foreach ($sampleSummaries as $x => $sampleMinMax) {
-            if ($sampleMinMax[0] === 0 || $sampleMinMax[1] === 0) {
-                continue;
-            }
-
-            # TODO configurable vertical detail
-            $y = round(100 / $range * ($maxPossibleValue - $sampleMinMax[1]));
-            $svgPathTop .= "L{$x} {$y}";
-            # TODO configurable vertical detail
-            $y = round(100 / $range * ($maxPossibleValue + $sampleMinMax[0] * -1));
-            $svgPathBottom = "L{$x} {$y}" . $svgPathBottom;
-        }
-
-        // TODO move gradient to stylesheet
-        // TODO this should be improved to use kinda template
-        $svg =
-        '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="' . count($sampleSummaries) . 'px" height="100px" preserveAspectRatio="none">
-    <defs>
-        <linearGradient id="gradient" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" style="stop-color:rgb(0,0,0);stop-opacity:1"/>
-            <stop offset="50%" style="stop-color:rgb(50,50,50);stop-opacity:1"/>
-            <stop offset="100%" style="stop-color:rgb(0,0,0);stop-opacity:1"/>
-        </linearGradient>
-    </defs>
-    <path d="M0 50' . $svgPathTop . $svgPathBottom . 'L0 50 Z" fill="url(#gradient)"/>
-</svg>';
+        $svg = $this->createSvg($sampleSummaries);
 
         if ($outputFileHandle) {
-            if (fwrite($outputFileHandle, $svg) === false) {
-                throw new RuntimeException('Failed to write to output file', self::ERR_FILE_WRITE);
-            }
-            if (! fclose($outputFileHandle)) {
-                throw new RuntimeException('Failed to close output file', self::ERR_FILE_CLOSE);
-            }
+            $this->writeToFile($outputFileHandle, $svg);
         }
 
         return $svg;
@@ -242,6 +138,153 @@ class Wave
     public function getTotalSeconds(): int
     {
         return $this->totalSeconds;
+    }
+
+    /**
+     * @return resource|null
+     *
+     * @throws RuntimeException
+     */
+    private function openOutputFile(string $outputFile): mixed
+    {
+        if ($outputFile === '') {
+            return null;
+        }
+
+        $outputFileHandle = fopen($outputFile, 'w');
+        if ($outputFileHandle === false) {
+            throw new RuntimeException('Failed to open output file for writing', self::ERR_FILE_ACCESS);
+        }
+
+        return $outputFileHandle;
+    }
+
+    private function validateResolution(float $resolution): void
+    {
+        if ($resolution > 1.0 || $resolution < 0.000001) {
+            throw new OutOfRangeException('Resolution must be between 1 and 0.000001', self::ERR_PARAM_VALUE);
+        }
+    }
+
+    /**
+     * @return resource
+     *
+     * @throws Exception
+     * @throws RuntimeException
+     */
+    private function openInputFile(): mixed
+    {
+        if ($this->file === null) {
+            throw new Exception('No file was loaded', self::ERR_FILE_ACCESS);
+        }
+
+        $fileHandle = fopen($this->file, 'r');
+        if (! $fileHandle) {
+            throw new RuntimeException('Failed to open file', self::ERR_FILE_ACCESS);
+        }
+
+        return $fileHandle;
+    }
+
+    /**
+     * @param resource $fileHandle
+     *
+     * @return array<int, array<int, int>>
+     *
+     * @throws RuntimeException
+     */
+    private function collectSampleSummaries(mixed $fileHandle, float $resolution): array
+    {
+        $sampleSummaryLength = $this->sampleRate / ($resolution * $this->sampleRate);
+        $sampleSummaries = [];
+        $samples = [];
+        $i = 0;
+
+        if (fseek($fileHandle, $this->dataOffset) === -1) {
+            throw new RuntimeException('Failed to seek in file', self::ERR_FILE_READ);
+        }
+
+        if ($this->bitsPerSample <= 0) {
+            throw new RuntimeException('Invalid value for bitsPerSample', self::ERR_FILE_READ);
+        }
+
+        while (($data = fread($fileHandle, $this->bitsPerSample))) {
+            /** @var array<string, int>|false $sample */
+            $sample = unpack('svol', $data);
+            if ($sample === false) {
+                throw new RuntimeException('Failed to unpack summary', self::ERR_FILE_READ);
+            }
+            $samples[] = (int) $sample['vol'];
+
+            if ($i > 0 && $i % $sampleSummaryLength === 0) {
+                $sampleSummaries[] = [min($samples), max($samples)];
+                $samples = [];
+            }
+            $i++;
+
+            if (fseek($fileHandle, $this->bitsPerSample * $this->channels * 3, SEEK_CUR) === -1) {
+                throw new RuntimeException('Failed to seek in file', self::ERR_FILE_READ);
+            }
+        }
+
+        return $sampleSummaries;
+    }
+
+    /**
+     * @param array<int, array<int, int>> $sampleSummaries
+     *
+     * @throws RuntimeException
+     */
+    private function createSvg(array $sampleSummaries): string
+    {
+        $minPossibleValue = (float) (2 ** $this->bitsPerSample / 2 * -1);
+        $maxPossibleValue = (float) ($minPossibleValue * -1 - 1);
+        $range = (float) (2 ** $this->bitsPerSample);
+
+        if ($range === 0.0) {
+            throw new RuntimeException('Invalid range value', self::ERR_FILE_READ);
+        }
+
+        $svgPathTop = '';
+        $svgPathBottom = '';
+
+        foreach ($sampleSummaries as $x => $sampleMinMax) {
+            if ($sampleMinMax[0] === 0 || $sampleMinMax[1] === 0) {
+                continue;
+            }
+
+            $yTop = round(100 / $range * ($maxPossibleValue - $sampleMinMax[1]));
+            $svgPathTop .= "L{$x} {$yTop}";
+
+            $yBottom = round(100 / $range * ($maxPossibleValue + $sampleMinMax[0] * -1));
+            $svgPathBottom = "L{$x} {$yBottom}" . $svgPathBottom;
+        }
+
+        return '<svg version="1.1" xmlns="http://www.w3.org/2000/svg" width="' . count($sampleSummaries) . 'px" height="100px" preserveAspectRatio="none">
+    <defs>
+        <linearGradient id="gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:rgb(0,0,0);stop-opacity:1"/>
+            <stop offset="50%" style="stop-color:rgb(50,50,50);stop-opacity:1"/>
+            <stop offset="100%" style="stop-color:rgb(0,0,0);stop-opacity:1"/>
+        </linearGradient>
+    </defs>
+    <path d="M0 50' . $svgPathTop . $svgPathBottom . 'L0 50 Z" fill="url(#gradient)"/>
+</svg>';
+    }
+
+    /**
+     * @param resource $outputFileHandle
+     *
+     * @throws RuntimeException
+     */
+    private function writeToFile(mixed $outputFileHandle, string $svg): void
+    {
+        if (fwrite($outputFileHandle, $svg) === false) {
+            throw new RuntimeException('Failed to write to output file', self::ERR_FILE_WRITE);
+        }
+        if (! fclose($outputFileHandle)) {
+            throw new RuntimeException('Failed to close output file', self::ERR_FILE_CLOSE);
+        }
     }
 
     /** @throws UnexpectedValueException */
