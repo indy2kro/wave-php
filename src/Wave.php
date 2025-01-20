@@ -71,127 +71,17 @@ class Wave
         }
     }
 
-    /**
-     * @throws Exception
-     */
+    /** @throws Exception */
     public function setFile(string $file): void
     {
-        if ($file === '') {
-            throw new UnexpectedValueException('No file specified', self::ERR_PARAM_VALUE);
-        }
-        if (! file_exists($file)) {
-            throw new RuntimeException('File does not exist', self::ERR_PARAM_VALUE);
-        }
-        $fileHandle = fopen($file, 'r');
-        if ($fileHandle === false) {
-            throw new RuntimeException('Failed to open file for reading', self::ERR_FILE_ACCESS);
-        }
-        $this->file = $file;
+        $this->validateFile($file);
+        $fileHandle = $this->openFile($file);
 
-        $chunkId = fread($fileHandle, 4);
-        if ($chunkId === false || $chunkId !== 'RIFF') {
-            throw new Exception('Unsupported file type', self::ERR_FILE_INCOMPATIBLE);
-        }
-        $this->chunkId = $chunkId;
-
-        $chunkSize = fread($fileHandle, 4);
-        if ($chunkSize === false) {
-            throw new RuntimeException('Failed to read chunk size from file', self::ERR_FILE_READ);
-        }
-
-        /** @var array<string, int>|false $chunkSizeUnpacked */
-        $chunkSizeUnpacked = unpack('VchunkSize', $chunkSize);
-        if ($chunkSizeUnpacked === false) {
-            throw new RuntimeException('Failed to unpack chunk size', self::ERR_FILE_READ);
-        }
-        $this->chunkSize = (int) $chunkSizeUnpacked['chunkSize'];
-
-        $format = fread($fileHandle, 4);
-        if ($format === false || $format !== 'WAVE') {
-            throw new Exception('Unsupported file format', self::ERR_FILE_INCOMPATIBLE);
-        }
-        $this->format = $format;
-
-        $subChunk1Id = fread($fileHandle, 4);
-        if ($subChunk1Id === false || $subChunk1Id !== 'fmt ') {
-            throw new Exception('Unsupported file format', self::ERR_FILE_INCOMPATIBLE);
-        }
-        $this->subChunk1Id = $subChunk1Id;
-
-        $subChunk1 = fread($fileHandle, 20);
-        if ($subChunk1 === false) {
-            throw new RuntimeException('Failed to read sub chunk 1 from file', self::ERR_FILE_READ);
-        }
-
-        /** @var array<string, int>|false $subChunk1Unpacked */
-        $subChunk1Unpacked = unpack('VsubChunk1Size/vaudioFormat/vchannels/VsampleRate/VbyteRate/vblockAlign/vbitsPerSample', $subChunk1);
-
-        if ($subChunk1Unpacked === false) {
-            throw new RuntimeException('Failed to unpack sub chunk 1', self::ERR_FILE_READ);
-        }
-        $this->subChunk1Size = (int) $subChunk1Unpacked['subChunk1Size'];
-
-        if ($subChunk1Unpacked['audioFormat'] !== 1) {
-            throw new Exception('Unsupported audio format', self::ERR_FILE_INCOMPATIBLE);
-        }
-
-        $this->audioFormat = $subChunk1Unpacked['audioFormat'];
-        $this->channels = (int) $subChunk1Unpacked['channels'];
-        $this->sampleRate = (int) $subChunk1Unpacked['sampleRate'];
-        $this->byteRate = (int) $subChunk1Unpacked['byteRate'];
-        $this->blockAlign = (int) $subChunk1Unpacked['blockAlign'];
-        $this->bitsPerSample = (int) $subChunk1Unpacked['bitsPerSample'];
-
-        if ($this->byteRate !== $this->sampleRate * $this->channels * $this->bitsPerSample / 8) {
-            throw new Exception('File header contains invalid data: byte rate does not match', self::ERR_FILE_HEADER);
-        }
-
-        if ($this->blockAlign !== $this->channels * $this->bitsPerSample / 8) {
-            throw new Exception('File header contains invalid data: block align does not match', self::ERR_FILE_HEADER);
-        }
-
-        // Skip irrelevant chunks until "data" chunk is found
-        do {
-            $subChunkId = fread($fileHandle, 4);
-            if ($subChunkId === false || strlen($subChunkId) < 4) {
-                throw new RuntimeException('Failed to read sub chunk id from file', self::ERR_FILE_READ);
-            }
-
-            $subChunkSizeData = fread($fileHandle, 4);
-            if ($subChunkSizeData === false || strlen($subChunkSizeData) < 4) {
-                throw new RuntimeException('Failed to read sub chunk size from file', self::ERR_FILE_READ);
-            }
-
-            /** @var array<string, int>|false $subChunkSizeUnpacked */
-            $subChunkSizeUnpacked = unpack('VsubChunkSize', $subChunkSizeData);
-            if ($subChunkSizeUnpacked === false || ! isset($subChunkSizeUnpacked['subChunkSize'])) {
-                throw new RuntimeException('Failed to unpack sub chunk size', self::ERR_FILE_READ);
-            }
-            $subChunkSize = (int) $subChunkSizeUnpacked['subChunkSize'];
-
-            if ($subChunkId !== 'data') {
-                // Skip non-data chunk
-                if ($subChunkSize < 0) {
-                    throw new RuntimeException('Invalid sub chunk size encountered', self::ERR_FILE_HEADER);
-                }
-                if (fseek($fileHandle, $subChunkSize, SEEK_CUR) === -1) {
-                    throw new RuntimeException('Failed to seek in file', self::ERR_FILE_READ);
-                }
-            }
-        } while ($subChunkId !== 'data');
-
-        $dataOffset = ftell($fileHandle);
-
-        if ($dataOffset === false) {
-            throw new RuntimeException('Failed to tell position in file', self::ERR_FILE_READ);
-        }
-
-        $this->subChunk2Size = $subChunkSize;
-        $this->dataOffset = $dataOffset;
-
-        $this->kiloBitPerSecond = $this->byteRate * 8 / 1000;
-        $this->totalSamples = (int) ($this->subChunk2Size * 8 / $this->bitsPerSample / $this->channels);
-        $this->totalSeconds = (int) round($this->subChunk2Size / $this->byteRate);
+        $this->readChunkId($fileHandle);
+        $this->readChunkSize($fileHandle);
+        $this->readFormat($fileHandle);
+        $this->readSubChunk1($fileHandle);
+        $this->findDataChunk($fileHandle);
 
         if (! fclose($fileHandle)) {
             throw new RuntimeException('Failed to close file', self::ERR_FILE_CLOSE);
@@ -352,5 +242,178 @@ class Wave
     public function getTotalSeconds(): int
     {
         return $this->totalSeconds;
+    }
+
+    /** @throws UnexpectedValueException */
+    private function validateFile(string $file): void
+    {
+        if ($file === '') {
+            throw new UnexpectedValueException('No file specified', self::ERR_PARAM_VALUE);
+        }
+        if (! file_exists($file)) {
+            throw new RuntimeException('File does not exist', self::ERR_PARAM_VALUE);
+        }
+    }
+
+    /**
+     * @return resource
+     *
+     * @throws RuntimeException
+     */
+    private function openFile(string $file): mixed
+    {
+        $fileHandle = fopen($file, 'r');
+        if ($fileHandle === false) {
+            throw new RuntimeException('Failed to open file for reading', self::ERR_FILE_ACCESS);
+        }
+        $this->file = $file;
+        return $fileHandle;
+    }
+
+    /**
+     * @param resource $fileHandle
+     *
+     * @throws Exception
+     */
+    private function readChunkId(mixed $fileHandle): void
+    {
+        $chunkId = fread($fileHandle, 4);
+        if ($chunkId === false || $chunkId !== 'RIFF') {
+            throw new Exception('Unsupported file type', self::ERR_FILE_INCOMPATIBLE);
+        }
+        $this->chunkId = $chunkId;
+    }
+
+    /**
+     * @param resource $fileHandle
+     *
+     * @throws RuntimeException
+     */
+    private function readChunkSize(mixed $fileHandle): void
+    {
+        $chunkSize = fread($fileHandle, 4);
+        if ($chunkSize === false) {
+            throw new RuntimeException('Failed to read chunk size from file', self::ERR_FILE_READ);
+        }
+
+        /** @var array<string, int>|false $chunkSizeUnpacked */
+        $chunkSizeUnpacked = unpack('VchunkSize', $chunkSize);
+        if ($chunkSizeUnpacked === false) {
+            throw new RuntimeException('Failed to unpack chunk size', self::ERR_FILE_READ);
+        }
+        $this->chunkSize = (int) $chunkSizeUnpacked['chunkSize'];
+    }
+
+    /**
+     * @param resource $fileHandle
+     *
+     * @throws Exception
+     */
+    private function readFormat(mixed $fileHandle): void
+    {
+        $format = fread($fileHandle, 4);
+        if ($format === false || $format !== 'WAVE') {
+            throw new Exception('Unsupported file format', self::ERR_FILE_INCOMPATIBLE);
+        }
+        $this->format = $format;
+    }
+
+    /**
+     * @param resource $fileHandle
+     *
+     * @throws Exception
+     */
+    private function readSubChunk1(mixed $fileHandle): void
+    {
+        $subChunk1Id = fread($fileHandle, 4);
+        if ($subChunk1Id === false || $subChunk1Id !== 'fmt ') {
+            throw new Exception('Unsupported file format', self::ERR_FILE_INCOMPATIBLE);
+        }
+        $this->subChunk1Id = $subChunk1Id;
+
+        $subChunk1 = fread($fileHandle, 20);
+        if ($subChunk1 === false) {
+            throw new RuntimeException('Failed to read sub chunk 1 from file', self::ERR_FILE_READ);
+        }
+
+        /** @var array<string, int>|false $subChunk1Unpacked */
+        $subChunk1Unpacked = unpack('VsubChunk1Size/vaudioFormat/vchannels/VsampleRate/VbyteRate/vblockAlign/vbitsPerSample', $subChunk1);
+        if ($subChunk1Unpacked === false) {
+            throw new RuntimeException('Failed to unpack sub chunk 1', self::ERR_FILE_READ);
+        }
+
+        $this->subChunk1Size = (int) $subChunk1Unpacked['subChunk1Size'];
+        if ($subChunk1Unpacked['audioFormat'] !== 1) {
+            throw new Exception('Unsupported audio format', self::ERR_FILE_INCOMPATIBLE);
+        }
+
+        $this->audioFormat = $subChunk1Unpacked['audioFormat'];
+        $this->channels = (int) $subChunk1Unpacked['channels'];
+        $this->sampleRate = (int) $subChunk1Unpacked['sampleRate'];
+        $this->byteRate = (int) $subChunk1Unpacked['byteRate'];
+        $this->blockAlign = (int) $subChunk1Unpacked['blockAlign'];
+        $this->bitsPerSample = (int) $subChunk1Unpacked['bitsPerSample'];
+
+        $this->validateHeader();
+    }
+
+    /** @throws Exception */
+    private function validateHeader(): void
+    {
+        if ($this->byteRate !== $this->sampleRate * $this->channels * $this->bitsPerSample / 8) {
+            throw new Exception('File header contains invalid data: byte rate does not match', self::ERR_FILE_HEADER);
+        }
+
+        if ($this->blockAlign !== $this->channels * $this->bitsPerSample / 8) {
+            throw new Exception('File header contains invalid data: block align does not match', self::ERR_FILE_HEADER);
+        }
+    }
+
+    /**
+     * @param resource $fileHandle
+     *
+     * @throws RuntimeException
+     */
+    private function findDataChunk(mixed $fileHandle): void
+    {
+        do {
+            $subChunkId = fread($fileHandle, 4);
+            if ($subChunkId === false || strlen($subChunkId) < 4) {
+                throw new RuntimeException('Failed to read sub chunk id from file', self::ERR_FILE_READ);
+            }
+
+            $subChunkSizeData = fread($fileHandle, 4);
+            if ($subChunkSizeData === false || strlen($subChunkSizeData) < 4) {
+                throw new RuntimeException('Failed to read sub chunk size from file', self::ERR_FILE_READ);
+            }
+
+            /** @var array<string, int>|false $subChunkSizeUnpacked */
+            $subChunkSizeUnpacked = unpack('VsubChunkSize', $subChunkSizeData);
+            if ($subChunkSizeUnpacked === false || ! isset($subChunkSizeUnpacked['subChunkSize'])) {
+                throw new RuntimeException('Failed to unpack sub chunk size', self::ERR_FILE_READ);
+            }
+            $subChunkSize = (int) $subChunkSizeUnpacked['subChunkSize'];
+
+            if ($subChunkId !== 'data') {
+                if ($subChunkSize < 0) {
+                    throw new RuntimeException('Invalid sub chunk size encountered', self::ERR_FILE_HEADER);
+                }
+                if (fseek($fileHandle, $subChunkSize, SEEK_CUR) === -1) {
+                    throw new RuntimeException('Failed to seek in file', self::ERR_FILE_READ);
+                }
+            }
+        } while ($subChunkId !== 'data');
+
+        $dataOffset = ftell($fileHandle);
+        if ($dataOffset === false) {
+            throw new RuntimeException('Failed to tell position in file', self::ERR_FILE_READ);
+        }
+
+        $this->subChunk2Size = $subChunkSize;
+        $this->dataOffset = $dataOffset;
+
+        $this->kiloBitPerSecond = $this->byteRate * 8 / 1000;
+        $this->totalSamples = (int) ($this->subChunk2Size * 8 / $this->bitsPerSample / $this->channels);
+        $this->totalSeconds = (int) round($this->subChunk2Size / $this->byteRate);
     }
 }
